@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+*.local
+.DS_Store
+*.log
+coverage/
+test-results/
+playwright-report/
+
+# Native addon build output (rebuilt via scripts/build-native.mjs)
+native/**/build/
+
+# Per-machine tool state — contains local absolute paths
+.claude/settings.local.json

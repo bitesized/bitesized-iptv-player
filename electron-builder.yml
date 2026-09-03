@@ -1,0 +1,36 @@
+appId: dev.iptvplayer.app
+productName: Bitesized IPTV Player
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.map,*.ts}'
+asarUnpack:
+  - '**/*.node'
+# Bundled mpv binaries (when present) ship outside the asar so the main
+# process can spawn them: resources/mpv/<platform>/mpv[.exe]
+extraResources:
+  - from: resources/mpv/${os}
+    to: mpv
+    filter: ['**/*']
+
+mac:
+  category: public.app-category.entertainment
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+  category: AudioVideo
+
+npmRebuild: true
+publish: null

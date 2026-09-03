@@ -1,0 +1,8 @@
+{
+  "name": "iptv-mpv-embed",
+  "version": "0.0.1",
+  "private": true,
+  "description": "In-process libmpv render embedding for the IPTV player (macOS).",
+  "main": "index.js",
+  "gypfile": true
+}

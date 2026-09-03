@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface: #0a0a0f;
+  --color-surface-raised: #14141c;
+  --color-surface-overlay: #1d1d28;
+  /* Default accent (Amber). Overridable at runtime by the accent theme picker,
+     which rewrites these two variables on :root (see lib/accent.ts). */
+  --color-accent: #f59e0b;
+  --color-accent-hover: #fbbf24;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* No background here: the window may be transparent (native mpv video draws
+     below the web layer). Each screen paints its own opaque bg; the Player
+     route stays transparent so the embedded video shows through. */
+  @apply text-neutral-200 antialiased;
+  overscroll-behavior: none;
+  user-select: none;
+}
+
+/* One visible focus ring for the whole app. Keyboard and remote users need to
+   see where they are at all times; :focus-visible keeps it off mouse
+   clicks. Components that draw their own ring override this locally. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Player sliders (seek + volume): a thin rounded track with an accent-filled
+   left portion (driven by the `--fill` percentage set inline) and a thumb that
+   fades in on hover/focus — the mainstream streaming-player look. */
+.player-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+.player-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 0%),
+    rgb(255 255 255 / 0.25) var(--fill, 0%)
+  );
+}
+.player-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4.5px;
+  height: 13px;
+  width: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.player-slider:hover::-webkit-slider-thumb,
+.player-slider:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+.player-slider:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.player-slider:focus-visible {
+  outline: none;
+}
