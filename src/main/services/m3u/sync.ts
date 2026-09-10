@@ -5,7 +5,7 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
-import { fetch } from 'undici'
+import { Agent, fetch } from 'undici'
 import type { AppDatabase } from '@main/db'
 import { upsertCategories, upsertChannels, upsertVod } from '@main/db/repos/catalog'
 import { markProviderSynced, setProviderStatus } from '@main/db/repos/providers'
@@ -17,6 +17,11 @@ import type { M3uEntry } from './parser'
 
 const USER_AGENT = 'IPTVPlayer/0.1'
 
+// Idle timeouts, not a wall-clock cap: a 100k-entry playlist is tens of
+// megabytes and may legitimately take minutes to stream in. Only a socket that
+// goes quiet is a failure. (bodyTimeout is undici's between-chunks timeout.)
+const dispatcher = new Agent({ headersTimeout: 30_000, bodyTimeout: 60_000 })
+
 async function openLines(source: {
   url: string | null
   filePath: string | null
@@ -27,7 +32,7 @@ async function openLines(source: {
   if (!source.url) throw new Error('Playlist has no URL or file path')
   const response = await fetch(source.url, {
     headers: { 'User-Agent': USER_AGENT },
-    signal: AbortSignal.timeout(120_000)
+    dispatcher
   })
   if (!response.ok || !response.body) {
     throw new Error(`Playlist download failed (HTTP ${response.status})`)

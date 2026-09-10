@@ -13,7 +13,19 @@ import { playerApiUrl } from './urls'
 import type { XtreamCredentials } from './urls'
 
 const USER_AGENT = 'IPTVPlayer/0.1'
-const REQUEST_TIMEOUT_MS = 30_000
+
+/** How long to wait for the provider to start responding at all. */
+const FIRST_BYTE_TIMEOUT_MS = 30_000
+/**
+ * Idle timeout *between* body chunks, not a cap on total download time: a full
+ * `get_vod_streams` on a large panel is tens of megabytes and legitimately takes
+ * minutes. Only silence on the socket is a failure. (A wall-clock cap here used
+ * to abort big movie catalogues mid-download, which surfaced as a bogus
+ * "invalid JSON" error.)
+ */
+const IDLE_TIMEOUT_MS = 60_000
+/** Refuse absurd payloads rather than OOM — well above any real catalogue. */
+const MAX_RESPONSE_BYTES = 400 * 1024 * 1024
 
 export class XtreamApiError extends Error {
   constructor(
@@ -25,37 +37,116 @@ export class XtreamApiError extends Error {
   }
 }
 
+export interface XtreamClientTimeouts {
+  firstByteMs?: number
+  idleMs?: number
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 /**
  * Thin typed client over player_api.php. No retries here — sync orchestration
  * owns retry/backoff policy.
  */
 export class XtreamClient {
-  constructor(private readonly creds: XtreamCredentials) {}
+  private readonly firstByteMs: number
+  private readonly idleMs: number
+
+  constructor(
+    private readonly creds: XtreamCredentials,
+    timeouts: XtreamClientTimeouts = {}
+  ) {
+    this.firstByteMs = timeouts.firstByteMs ?? FIRST_BYTE_TIMEOUT_MS
+    this.idleMs = timeouts.idleMs ?? IDLE_TIMEOUT_MS
+  }
 
   private async get<T>(action?: string, extra?: Record<string, string | number>): Promise<T> {
     const url = playerApiUrl(this.creds, action, extra)
-    let response
+    const label = action ?? 'auth'
+
+    // One controller for the whole exchange, re-armed on every chunk received,
+    // so the deadline tracks silence rather than total elapsed time.
+    const controller = new AbortController()
+    let timedOut = false
+    let timer: NodeJS.Timeout | undefined
+    const arm = (ms: number): void => {
+      timer = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, ms)
+    }
+    const rearm = (): void => {
+      clearTimeout(timer)
+      arm(this.idleMs)
+    }
+    arm(this.firstByteMs)
+
     try {
-      response = await fetch(url, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-      })
-    } catch (err) {
-      throw new XtreamApiError(
-        `Request failed (${action ?? 'auth'}): ${err instanceof Error ? err.message : String(err)}`
-      )
+      let response
+      try {
+        response = await fetch(url, {
+          headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+          signal: controller.signal
+        })
+      } catch (err) {
+        throw new XtreamApiError(
+          timedOut
+            ? `Provider did not respond within ${Math.round(this.firstByteMs / 1000)}s (${label})`
+            : `Request failed (${label}): ${errText(err)}`
+        )
+      }
+      if (!response.ok) {
+        throw new XtreamApiError(
+          `HTTP ${response.status} from provider (${label})`,
+          response.status
+        )
+      }
+
+      let body: string
+      try {
+        body = await this.readBody(response, rearm)
+      } catch (err) {
+        throw new XtreamApiError(
+          timedOut
+            ? `Download stalled for ${Math.round(this.idleMs / 1000)}s (${label}) — the provider stopped sending data`
+            : `Download failed (${label}): ${errText(err)}`
+        )
+      }
+
+      try {
+        return JSON.parse(body) as T
+      } catch (err) {
+        throw new XtreamApiError(`Provider returned invalid JSON (${label}): ${errText(err)}`)
+      }
+    } finally {
+      clearTimeout(timer)
     }
-    if (!response.ok) {
-      throw new XtreamApiError(
-        `HTTP ${response.status} from provider (${action ?? 'auth'})`,
-        response.status
-      )
+  }
+
+  /**
+   * Read the whole body as text, re-arming the idle timer per chunk. Decoding
+   * incrementally keeps a single rope-joined string instead of buffering the
+   * bytes and copying them again on concat.
+   */
+  private async readBody(
+    response: { body: ReadableStream<Uint8Array> | null },
+    onChunk: () => void
+  ): Promise<string> {
+    if (!response.body) return ''
+    const decoder = new TextDecoder()
+    let text = ''
+    let bytes = 0
+    for await (const chunk of response.body) {
+      onChunk()
+      bytes += chunk.byteLength
+      if (bytes > MAX_RESPONSE_BYTES) {
+        throw new Error(`response exceeded ${Math.round(MAX_RESPONSE_BYTES / 1024 / 1024)}MB`)
+      }
+      text += decoder.decode(chunk, { stream: true })
     }
-    try {
-      return (await response.json()) as T
-    } catch {
-      throw new XtreamApiError(`Provider returned invalid JSON (${action ?? 'auth'})`)
-    }
+    return text + decoder.decode()
   }
 
   /** Auth ping — also returns account + server info. Throws on bad creds. */

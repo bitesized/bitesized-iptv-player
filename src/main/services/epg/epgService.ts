@@ -4,7 +4,7 @@
 
 import { createGunzip } from 'node:zlib'
 import { Readable } from 'node:stream'
-import { fetch } from 'undici'
+import { Agent, fetch } from 'undici'
 import type { AppDatabase } from '@main/db'
 import { getChannelById } from '@main/db/repos/browse'
 import { purgeOldProgrammes, upsertProgrammes } from '@main/db/repos/epg'
@@ -14,6 +14,10 @@ import { XtreamClient } from '@main/services/xtream/client'
 import { asEpoch, asString } from '@main/services/xtream/normalize'
 import { effectiveEpgChannelId } from '@shared/epg'
 import { parseXmltv } from './xmltv'
+
+// Idle timeouts rather than a wall-clock cap — a full XMLTV guide is large and
+// slow, but a socket that goes quiet for a minute is dead.
+const xmltvDispatcher = new Agent({ headersTimeout: 30_000, bodyTimeout: 60_000 })
 
 const HYDRATE_TTL_MS = 30 * 60_000
 const MAX_CONCURRENT_HYDRATIONS = 2
@@ -106,7 +110,7 @@ export class EpgService {
   async ingestXmltv(url: string): Promise<number> {
     const response = await fetch(url, {
       headers: { 'User-Agent': 'IPTVPlayer/0.1' },
-      signal: AbortSignal.timeout(300_000)
+      dispatcher: xmltvDispatcher
     })
     if (!response.ok || !response.body) {
       throw new Error(`EPG download failed (HTTP ${response.status})`)
