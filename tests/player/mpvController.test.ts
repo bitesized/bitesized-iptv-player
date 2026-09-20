@@ -44,6 +44,13 @@ describe('buildMpvArgs', () => {
   it('adds --wid only when a window id exists', () => {
     expect(buildMpvArgs('/tmp/sock', '777')).toContain('--wid=777')
   })
+
+  // libmpv 0.41's ao_coreaudio leaks its hotplug listener when audio init
+  // fails, and the next output-device change then crashes on the freed ao.
+  it('prefers ao_avfoundation on macOS, with coreaudio as the fallback', () => {
+    expect(buildMpvArgs('/tmp/sock', null, 'darwin')).toContain('--ao=avfoundation,coreaudio')
+    expect(buildMpvArgs('/tmp/sock', null, 'linux').some((a) => a.startsWith('--ao='))).toBe(false)
+  })
 })
 
 describe('loadCommandPlan', () => {

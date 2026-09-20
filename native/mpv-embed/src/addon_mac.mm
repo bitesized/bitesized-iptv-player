@@ -321,6 +321,20 @@ napi_value Create(napi_env env, napi_callback_info info) {
   opt("input-vo-keyboard", "no");
   opt("keep-open", "yes");
   opt("hwdec", "auto-safe");
+  // Audio output: AVFoundation first, CoreAudio only as a fallback.
+  //
+  // libmpv 0.41's ao_coreaudio registers its CoreAudio hotplug listener early
+  // in init() and its error path returns *without* calling uninit(), so any
+  // failed audio init — exactly what a device disappearing mid-switch causes,
+  // e.g. AirPods handing off — leaves a live listener pointing at the freed
+  // `ao`. The next output-device change then runs hotplug_cb on freed memory
+  // and takes the whole app down (crash reports: SIGSEGV in
+  // hotplug_cb -> mp_msg on the HALC_ProxyNotification queue). Upstream fixed
+  // this after 0.41 by registering last and calling uninit() on failure; until
+  // a fixed libmpv is what we link against, ao_avfoundation avoids the code
+  // path altogether — it registers no hardware listeners and follows the
+  // system default device itself.
+  opt("ao", "avfoundation,coreaudio");
   opt("cache", "yes");
   opt("cache-secs", "30");
   opt("demuxer-max-bytes", "64MiB");

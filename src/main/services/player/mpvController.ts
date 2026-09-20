@@ -86,7 +86,11 @@ export function resolveWid(
   }
 }
 
-export function buildMpvArgs(sock: string, wid: string | null): string[] {
+export function buildMpvArgs(
+  sock: string,
+  wid: string | null,
+  platform: NodeJS.Platform = process.platform
+): string[] {
   const args = [
     '--idle=yes',
     '--no-config',
@@ -105,6 +109,12 @@ export function buildMpvArgs(sock: string, wid: string | null): string[] {
     '--user-agent=IPTVPlayer/0.1',
     `--input-ipc-server=${sock}`
   ]
+  // macOS: prefer ao_avfoundation. libmpv 0.41's ao_coreaudio leaks its
+  // CoreAudio hotplug listener when audio init fails (its error path skips
+  // uninit()), and the next output-device change — swapping to AirPods, say —
+  // then calls back into the freed `ao` and segfaults mpv. See the same note
+  // in native/mpv-embed/src/addon_mac.mm, where the crash is fatal to the app.
+  if (platform === 'darwin') args.push('--ao=avfoundation,coreaudio')
   if (wid !== null) args.push(`--wid=${wid}`)
   return args
 }
