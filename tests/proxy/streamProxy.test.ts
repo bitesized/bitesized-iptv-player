@@ -55,6 +55,14 @@ describe('StreamProxy', () => {
         res.end('0123456789')
         return
       }
+      if (req.url === '/dies-midstream') {
+        // Headers and a first chunk, then the connection dies — what a provider
+        // dropping a live stream looks like to undici.
+        res.writeHead(200, { 'content-type': 'video/mp2t', 'content-length': '10' })
+        res.write('012')
+        setTimeout(() => req.socket.destroy(), 10)
+        return
+      }
       if (req.url === '/logo.png') {
         res.writeHead(200, { 'content-type': 'image/png' })
         res.end('PNGDATA')
@@ -118,6 +126,26 @@ describe('StreamProxy', () => {
     const segResponse = await fetch(`${new URL(url).origin}${segPath}`)
     expect(segResponse.status).toBe(404) // upstream has no seg1.ts — but it was proxied
     expect(requests.at(-1)!.url).toBe('/seg1.ts')
+  })
+
+  // Regression: the upstream body error arrived after the headers were sent, and
+  // `pipe()` doesn't forward it — Node turned it into an uncaught exception that
+  // killed the main process minutes into a stream.
+  it('survives an upstream that dies mid-body', async () => {
+    const uncaught: unknown[] = []
+    const onUncaught = (err: unknown): void => void uncaught.push(err)
+    process.on('uncaughtException', onUncaught)
+    try {
+      const url = proxy.register(`http://127.0.0.1:${upstreamPort}/dies-midstream`)
+      const response = await fetch(url)
+      expect(response.status).toBe(200)
+      // The client sees a truncated response; the app stays up.
+      await expect(response.text()).rejects.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+    }
   })
 
   it('404s unknown tokens', async () => {

@@ -3,7 +3,7 @@
 // XMLTV ingestion for M3U/auxiliary sources.
 
 import { createGunzip } from 'node:zlib'
-import { Readable } from 'node:stream'
+import { Readable, pipeline } from 'node:stream'
 import { Agent, fetch } from 'undici'
 import type { AppDatabase } from '@main/db'
 import { getChannelById } from '@main/db/repos/browse'
@@ -115,10 +115,19 @@ export class EpgService {
     if (!response.ok || !response.body) {
       throw new Error(`EPG download failed (HTTP ${response.status})`)
     }
-    let stream: Readable = Readable.fromWeb(response.body as never)
+    const download: Readable = Readable.fromWeb(response.body as never)
+    let stream: Readable = download
     const contentType = response.headers.get('content-type') ?? ''
     if (url.replace(/\?.*$/, '').endsWith('.gz') || contentType.includes('gzip')) {
-      stream = stream.pipe(createGunzip())
+      // pipeline, not pipe: a guide download that dies mid-body (undici raises
+      // "other side closed") must surface as an error on the stream the parser
+      // is listening to, so ingest rejects and the scheduler retries. `pipe`
+      // leaves the source error unhandled, which kills the main process.
+      const gunzip = createGunzip()
+      pipeline(download, gunzip, () => {
+        // Handled where it matters: the error reaches the parser via gunzip.
+      })
+      stream = gunzip
     }
 
     const buffer: ProgrammeRow[] = []

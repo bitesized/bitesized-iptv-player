@@ -8,7 +8,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { lookup } from 'node:dns'
 import { isIPv4, isIPv6 } from 'node:net'
-import { Readable } from 'node:stream'
+import { Readable, pipeline } from 'node:stream'
 import { Agent, interceptors, request } from 'undici'
 import type { Dispatcher } from 'undici'
 
@@ -81,6 +81,27 @@ function sameOrigin(a: string, b: string): boolean {
 
 interface Upstream {
   url: string
+}
+
+/**
+ * Stream an upstream body to the client.
+ *
+ * Upstream sockets die mid-body routinely — the provider drops the connection,
+ * a box reboots, a CDN edge cycles — and undici reports that as an `error` on
+ * the body stream *after* the response headers have gone out. `pipe()` does not
+ * forward a source error to the destination, so nothing handled it and Node
+ * turned it into an uncaught exception that killed the main process
+ * ("SocketError: other side closed") minutes into a stream.
+ *
+ * `pipeline()` owns both ends: it destroys the response when the upstream dies
+ * (the player sees a closed connection and reconnects) and destroys the
+ * upstream read when the player goes away, with the expected error handled
+ * rather than thrown at the process.
+ */
+function pipeBody(body: NodeJS.ReadableStream, res: ServerResponse): void {
+  pipeline(Readable.from(body), res, () => {
+    // Either end going away is normal here; pipeline has torn both down.
+  })
 }
 
 export class StreamProxy {
@@ -277,9 +298,7 @@ export class StreamProxy {
       }
 
       res.writeHead(response.statusCode, passthrough)
-      const stream = Readable.from(response.body)
-      stream.pipe(res)
-      res.on('close', () => stream.destroy())
+      pipeBody(response.body, res)
     } catch {
       if (!res.headersSent) res.writeHead(502)
       res.end()
@@ -325,9 +344,7 @@ export class StreamProxy {
         'x-content-type-options': 'nosniff',
         'cache-control': 'private, max-age=86400'
       })
-      const stream = Readable.from(response.body)
-      stream.pipe(res)
-      res.on('close', () => stream.destroy())
+      pipeBody(response.body, res)
     } catch {
       if (!res.headersSent) res.writeHead(502)
       res.end()

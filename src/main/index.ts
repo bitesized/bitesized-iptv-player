@@ -15,6 +15,19 @@ import { SyncManager } from './services/syncManager'
 
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
+// Last-resort net. Every stream the app plays is proxied through main, and a
+// provider dropping a socket mid-body is routine — but an error that reaches
+// Node unhandled kills the main process and shows Electron's "A JavaScript
+// error occurred in the main process" dialog, ending playback. Known cases are
+// handled where they happen (the proxy's pipelines, EPG ingest); this catches
+// the rest, logs them, and keeps the player running.
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaught exception:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandled rejection:', reason)
+})
+
 // Test isolation: e2e runs point userData at a throwaway directory.
 if (process.env['IPTV_USER_DATA']) {
   app.setPath('userData', process.env['IPTV_USER_DATA'])
