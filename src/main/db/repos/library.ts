@@ -2,7 +2,7 @@
 
 import type { AppDatabase } from '@main/db'
 import type { ContentKind, ContinueWatchingItem, FavoriteEntry } from '@shared/types'
-import { ADULT_CATEGORY_SQL } from './browse'
+import { ADULT_CATEGORY_SQL, HIDDEN_CATEGORY_SQL } from './browse'
 import { isKidsProfile } from './profiles'
 
 export function toggleFavorite(
@@ -75,6 +75,7 @@ export function listFavoritesDetailed(
   const branches = FAVORITE_SOURCES.map(({ itemType, table, image }) => {
     args.push(profileId)
     if (providerId !== undefined) args.push(providerId)
+    args.push(profileId)
     return `SELECT '${itemType}' AS item_type, t.id AS item_id, t.provider_id AS provider_id,
                    t.name AS name, t.${image} AS image, t.category_id AS category_id,
                    c.name AS category_name, f.created_at AS created_at
@@ -83,7 +84,8 @@ export function listFavoritesDetailed(
             LEFT JOIN categories c ON c.id = t.category_id
             WHERE f.profile_id = ? AND f.item_type = '${itemType}' AND t.deleted = 0
               ${providerId !== undefined ? 'AND t.provider_id = ?' : ''}
-              ${kids ? `AND (t.category_id IS NULL OR t.category_id NOT IN (${ADULT_CATEGORY_SQL}))` : ''}`
+              ${kids ? `AND (t.category_id IS NULL OR t.category_id NOT IN (${ADULT_CATEGORY_SQL}))` : ''}
+              AND (t.category_id IS NULL OR t.category_id NOT IN (${HIDDEN_CATEGORY_SQL}))`
   })
 
   const rows = db
@@ -171,9 +173,13 @@ export function continueWatching(
        LEFT JOIN episodes e ON h.item_type = 'episode' AND e.id = h.item_id
        LEFT JOIN series s ON s.id = e.series_id
        WHERE h.profile_id = ? AND h.completed = 0 AND h.item_type != 'live'
+         AND (COALESCE(v.category_id, s.category_id) IS NULL
+              OR COALESCE(v.category_id, s.category_id) NOT IN (
+                SELECT category_id FROM category_prefs WHERE profile_id = ? AND hidden = 1
+              ))
        ORDER BY h.updated_at DESC LIMIT ?`
     )
-    .all(profileId, Math.min(limit, 100)) as {
+    .all(profileId, profileId, Math.min(limit, 100)) as {
     item_type: 'vod' | 'episode'
     item_id: number
     position_secs: number

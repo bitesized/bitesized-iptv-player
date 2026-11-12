@@ -78,8 +78,12 @@ export function HomeScreen(): JSX.Element {
     queryFn: () => invoke('history:continueWatching', { profileId: profileId!, limit: 15 }),
     enabled: profileId !== null
   })
-  const recentVod = useFlatPages(useVodPage({ categoryId: 'recent' }))
-  const recentSeries = useFlatPages(useSeriesPage({ categoryId: 'recent' }))
+  const recentVod = useFlatPages(
+    useVodPage({ categoryId: 'recent', profileId: profileId ?? undefined })
+  )
+  const recentSeries = useFlatPages(
+    useSeriesPage({ categoryId: 'recent', profileId: profileId ?? undefined })
+  )
   const favoriteVod = useFlatPages(
     useVodPage({ categoryId: 'favorites', profileId: profileId ?? undefined })
   )

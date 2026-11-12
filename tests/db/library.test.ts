@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { migrate } from '@main/db'
+import { setCategoryHidden } from '@main/db/repos/browse'
 import {
   continueWatching,
   listFavoritesDetailed,
@@ -62,6 +63,25 @@ describe('removeHistory', () => {
   it('is a no-op when there is no matching row', () => {
     const db = openTestDb()
     expect(() => removeHistory(db, 1, 'vod', 999)).not.toThrow()
+  })
+
+  it('drops items whose category the profile has hidden', () => {
+    const db = openTestDb()
+    db.prepare(
+      "INSERT INTO categories (id, provider_id, kind, remote_id, name) VALUES (2, 1, 'vod', 'c2', 'Category 1')"
+    ).run()
+    db.prepare('UPDATE vod SET category_id = 2 WHERE id = 10').run()
+    upsertHistory(db, {
+      profileId: 1,
+      itemType: 'vod',
+      itemId: 10,
+      positionSecs: 60,
+      durationSecs: 3600
+    })
+    expect(continueWatching(db, 1, 10)).toHaveLength(1)
+
+    setCategoryHidden(db, 1, 2, true)
+    expect(continueWatching(db, 1, 10)).toHaveLength(0)
   })
 })
 
@@ -133,5 +153,19 @@ describe('listFavoritesDetailed', () => {
     favorite(db, 'vod', 11, 2)
 
     expect(listFavoritesDetailed(db, 2).map((e) => e.name)).toEqual(['A Movie'])
+  })
+
+  it('hides favorites whose category the profile has hidden, even though they were favorited', () => {
+    const db = openTestDb()
+    seedCatalog(db)
+    favorite(db, 'vod', 10)
+    favorite(db, 'vod', 12)
+    expect(listFavoritesDetailed(db, 1).map((e) => e.name).sort()).toEqual([
+      'A Movie',
+      'Loose Movie'
+    ])
+
+    setCategoryHidden(db, 1, 2, true) // category 2 = "Action", holds vod 10
+    expect(listFavoritesDetailed(db, 1).map((e) => e.name)).toEqual(['Loose Movie'])
   })
 })

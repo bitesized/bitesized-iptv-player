@@ -16,6 +16,14 @@ export const ADULT_CATEGORY_SQL = `SELECT id FROM categories
    WHERE lower(name) LIKE '%adult%' OR lower(name) LIKE '%xxx%'
       OR lower(name) LIKE '%porn%' OR name LIKE '%18+%'`
 
+/**
+ * Categories the given profile has hidden. Items in a hidden category must
+ * disappear everywhere — not just from the category sidebar — so every pager
+ * (including "recently added" and search) filters against this too.
+ */
+export const HIDDEN_CATEGORY_SQL = `SELECT category_id FROM category_prefs
+   WHERE profile_id = ? AND hidden = 1`
+
 // --- Cursor encoding ------------------------------------------------------
 
 interface Cursor {
@@ -158,6 +166,9 @@ function pageRows(db: AppDatabase, spec: PageSpec): Page<Record<string, unknown>
   if (isKidsProfile(db, query.profileId)) {
     where.push(`(t.category_id IS NULL OR t.category_id NOT IN (${ADULT_CATEGORY_SQL}))`)
   }
+
+  where.push(`(t.category_id IS NULL OR t.category_id NOT IN (${HIDDEN_CATEGORY_SQL}))`)
+  args.push(query.profileId ?? -1)
 
   const categoryId = query.categoryId ?? 'all'
   if (typeof categoryId === 'number') {
@@ -472,8 +483,10 @@ export function search(db: AppDatabase, query: SearchQuery): Page<Channel | VodI
   const kidsFilter = isKidsProfile(db, query.profileId)
     ? `AND (t.category_id IS NULL OR t.category_id NOT IN (${ADULT_CATEGORY_SQL}))`
     : ''
+  const hiddenFilter = `AND (t.category_id IS NULL OR t.category_id NOT IN (${HIDDEN_CATEGORY_SQL}))`
   const args: unknown[] = [ftsQuery]
   if (query.providerId !== undefined) args.push(query.providerId)
+  args.push(query.profileId ?? -1)
 
   // Optional filters combinable with the FTS term. Only applied for
   // the kind that carries the column, so an irrelevant filter is a no-op.
@@ -496,7 +509,7 @@ export function search(db: AppDatabase, query: SearchQuery): Page<Channel | VodI
     .prepare(
       `SELECT t.* FROM ${fts} f
        JOIN ${base} t ON t.id = f.rowid
-       WHERE ${fts} MATCH ? AND t.deleted = 0 ${providerFilter} ${kidsFilter} ${filterSql}
+       WHERE ${fts} MATCH ? AND t.deleted = 0 ${providerFilter} ${kidsFilter} ${hiddenFilter} ${filterSql}
        ORDER BY bm25(${fts}), t.name COLLATE NOCASE
        LIMIT ? OFFSET ?`
     )

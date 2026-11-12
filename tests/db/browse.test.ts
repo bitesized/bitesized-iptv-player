@@ -131,6 +131,30 @@ describe('pageVod recent sort', () => {
     const page = pageVod(db, { cursor: null, limit: 10, categoryId: 'recent' })
     expect(page.items.map((v) => v.name)).toEqual(['New', 'Mid', 'Old'])
   })
+
+  it('hides items whose category is hidden for the profile, even from "recent"', () => {
+    const db = openTestDb()
+    db.prepare(
+      "INSERT INTO categories (id, provider_id, kind, remote_id, name) VALUES (5, 1, 'vod', 'r1', 'Movie 1')"
+    ).run()
+    db.prepare(
+      'INSERT INTO vod (provider_id, category_id, stream_id, name, added_at) VALUES (1, 5, ?, ?, ?)'
+    ).run('1', 'Movie 1', 300)
+    db.prepare(
+      'INSERT INTO vod (provider_id, category_id, stream_id, name, added_at) VALUES (1, NULL, ?, ?, ?)'
+    ).run('2', 'Other Movie', 200)
+    setCategoryHidden(db, 1, 5, true)
+
+    const recent = pageVod(db, { cursor: null, limit: 10, categoryId: 'recent', profileId: 1 })
+    expect(recent.items.map((v) => v.name)).toEqual(['Other Movie'])
+
+    const all = pageVod(db, { cursor: null, limit: 10, profileId: 1 })
+    expect(all.items.map((v) => v.name)).toEqual(['Other Movie'])
+
+    // No profile → nothing is hidden.
+    const noProfile = pageVod(db, { cursor: null, limit: 10, categoryId: 'recent' })
+    expect(noProfile.items.map((v) => v.name)).toEqual(['Movie 1', 'Other Movie'])
+  })
 })
 
 describe('listCategories', () => {
@@ -216,6 +240,23 @@ describe('search', () => {
     expect(all).toContain('The Matrix')
     expect(all).toContain('Matrimony')
     expect(all).not.toContain('Unrelated Movie')
+  })
+
+  it('excludes matches whose category is hidden for the profile', () => {
+    const db = openTestDb()
+    db.prepare(
+      "INSERT INTO categories (id, provider_id, kind, remote_id, name) VALUES (5, 1, 'vod', 'r1', 'Category 1')"
+    ).run()
+    db.prepare(
+      'INSERT INTO vod (provider_id, category_id, stream_id, name) VALUES (1, 5, ?, ?)'
+    ).run('1', 'Matrix 1')
+    setCategoryHidden(db, 1, 5, true)
+
+    const hidden = search(db, { term: 'matrix', kind: 'vod', cursor: null, limit: 10, profileId: 1 })
+    expect(hidden.items).toHaveLength(0)
+
+    const visible = search(db, { term: 'matrix', kind: 'vod', cursor: null, limit: 10 })
+    expect(visible.items).toHaveLength(1)
   })
 
   it('searches channels and series tables too', () => {

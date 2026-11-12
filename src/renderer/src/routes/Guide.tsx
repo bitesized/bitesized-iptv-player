@@ -85,6 +85,7 @@ function ProgrammeBlocks({
 export function GuideScreen(): JSX.Element {
   const navigate = useNavigate()
   const providerId = useUiStore((s) => s.activeProviderId) ?? undefined
+  const profileId = useUiStore((s) => s.activeProfileId) ?? undefined
   const { start, end } = useGuideWindow()
   const [selected, setSelected] = useState<{
     programme: EpgProgramme
@@ -103,7 +104,7 @@ export function GuideScreen(): JSX.Element {
     navigate(`/player/live/${channel.id}?${params.toString()}`)
   }
 
-  const query = useChannelsPage({ providerId, categoryId: 'all' })
+  const query = useChannelsPage({ providerId, categoryId: 'all', profileId })
   const channels = useFlatPages(query)
 
   const scrollRef = useRef<HTMLDivElement>(null)
